@@ -1,105 +1,93 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace SpaceMissionGame.Core
 {
     /// <summary>
-    /// The "Brain" of the Space Mission Design Game (Member 1).
-    /// Evaluates a player's SpacecraftDesign against a NASA MissionProfile using deterministic
-    /// Systems Engineering trade-off formulas, GMAT orbital sunlight/eclipse ratios,
-    /// NASA CubeSat 101 verification rules, and the JPL CML 4 Red/Yellow/Green (RYG) checklist.
+    /// Member 1: The "Brain" — Trade-Off Math Calculator & JPL CML 4 RYG Checklist Evaluator.
+    /// Directly consumes and populates the shared OOP models in GameEnumsAndModels.cs.
     /// </summary>
     public static class MissionCalculator
     {
         /// <summary>
-        /// Evaluates the current spacecraft design and returns a complete SimulationResult
-        /// for Phase 2 (Live UI Bars), Phase 3 (CML 4 RYG Checklist), Phase 4 (2D Orbit Sim),
-        /// and Phase 5 (Final NASA Debrief Scorecard).
-        /// Safe to call at any time, even when parts are still being selected (null-safe).
+        /// Overload that evaluates a SpacecraftDesign using its internal design.SelectedMission.
         /// </summary>
-        public static SimulationResult EvaluateMission(MissionProfile mission, SpacecraftDesign design)
+        public static MissionEvaluationResult EvaluateMission(SpacecraftDesign design)
         {
-            SimulationResult result = new SimulationResult();
+            MissionProfile mission = design != null ? design.SelectedMission : null;
+            return EvaluateMission(mission, design);
+        }
 
-            if (mission == null) mission = new MissionProfile();
+        /// <summary>
+        /// Full evaluation of a player's SpacecraftDesign against a NASA MissionProfile.
+        /// Safe to call at any time (Phase 2 live UI bars, Phase 3 CML 4 RYG checklist, Phase 4/5 debrief).
+        /// </summary>
+        public static MissionEvaluationResult EvaluateMission(MissionProfile mission, SpacecraftDesign design)
+        {
+            MissionEvaluationResult result = new MissionEvaluationResult();
+
             if (design == null) design = new SpacecraftDesign();
+            if (mission == null) mission = design.SelectedMission ?? new MissionProfile();
 
-            List<ComponentPart> equippedParts = design.GetAllEquippedParts();
+            List<ComponentPart> equippedParts = design.GetAllSelectedParts();
 
             // =========================================================================
-            // 1. MASS & VOLUME CALCULATIONS (Launch & Chassis Constraints)
+            // 1. MASS & ENVELOPE MARGIN CALCULATIONS
             // =========================================================================
-            float totalMass = 0f;
-            float totalVolume = 0f;
-
+            float totalMass = design.ExtraMassKg;
             foreach (ComponentPart part in equippedParts)
             {
-                totalMass += part.massKg;
-                totalVolume += part.volumeUnitsU;
+                totalMass += part.MassKg;
             }
+            result.TotalMassKg = totalMass;
 
-            result.totalMassKg = totalMass;
-            result.totalVolumeU = totalVolume;
+            float chassisMaxMass = design.SelectedChassis != null && design.SelectedChassis.MaxMassCapacityKg > 0f
+                ? design.SelectedChassis.MaxMassCapacityKg
+                : 1.33f;
+            float launcherMaxMass = design.SelectedLaunchVehicle != null && design.SelectedLaunchVehicle.MaxMassCapacityKg > 0f
+                ? design.SelectedLaunchVehicle.MaxMassCapacityKg
+                : chassisMaxMass;
 
-            // Determine Max Allowed Mass from Chassis and Launch Dispenser
-            float chassisMaxMass = design.selectedChassis != null ? design.selectedChassis.maxMassLimitKg : 1.33f;
-            float launcherMaxMass = design.selectedLaunchVehicle != null ? design.selectedLaunchVehicle.maxMassLimitKg : chassisMaxMass;
-
-            if (design.selectedChassis != null && design.selectedLaunchVehicle != null)
+            if (design.SelectedChassis != null && design.SelectedLaunchVehicle != null)
             {
-                result.maxAllowedMassKg = Mathf.Min(chassisMaxMass, launcherMaxMass);
+                result.MaxAllowedMassKg = Mathf.Min(chassisMaxMass, launcherMaxMass);
             }
-            else if (design.selectedChassis != null)
+            else if (design.SelectedChassis != null)
             {
-                result.maxAllowedMassKg = chassisMaxMass;
+                result.MaxAllowedMassKg = chassisMaxMass;
             }
-            else if (design.selectedLaunchVehicle != null)
+            else if (design.SelectedLaunchVehicle != null)
             {
-                result.maxAllowedMassKg = launcherMaxMass;
+                result.MaxAllowedMassKg = launcherMaxMass;
             }
             else
             {
-                result.maxAllowedMassKg = 1.33f;
+                result.MaxAllowedMassKg = 1.33f;
             }
 
-            result.maxAllowedVolumeU = design.selectedChassis != null ? design.selectedChassis.maxVolumeU : 1.0f;
-
-            // Mass Margin (%) = ((Max - Actual) / Max) * 100
-            result.massMarginPercent = result.maxAllowedMassKg > 0f
-                ? ((result.maxAllowedMassKg - result.totalMassKg) / result.maxAllowedMassKg) * 100f
+            result.MassMarginPercent = result.MaxAllowedMassKg > 0f
+                ? ((result.MaxAllowedMassKg - result.TotalMassKg) / result.MaxAllowedMassKg) * 100f
                 : -100f;
 
-            bool chassisFitsDispenser = true;
-            if (design.selectedChassis != null && design.selectedLaunchVehicle != null)
+            float reqMassMargin = mission.RequiredMassMarginPct > 0f ? mission.RequiredMassMarginPct : 15f;
+            bool hasOdardebrisViolation = false;
+            foreach (ComponentPart part in equippedParts)
             {
-                chassisFitsDispenser = (int)design.selectedChassis.cubeSatSize <= (int)design.selectedLaunchVehicle.cubeSatSize;
+                if (part.IsHighMeltingPointMetal) hasOdardebrisViolation = true;
             }
 
-            if (design.selectedChassis == null || result.massMarginPercent < 0f || !chassisFitsDispenser)
+            if (design.SelectedChassis == null || result.MassMarginPercent < 0f || hasOdardebrisViolation)
             {
-                result.massStatus = RYGStatus.Red;
+                result.MassMarginStatus = RYGStatus.Red;
             }
-            else if (result.massMarginPercent < mission.requiredMassMarginPercent)
+            else if (result.MassMarginPercent < reqMassMargin)
             {
-                result.massStatus = RYGStatus.Yellow;
+                result.MassMarginStatus = RYGStatus.Yellow;
             }
             else
             {
-                result.massStatus = RYGStatus.Green;
-            }
-
-            // Volume Status (U capacity)
-            if (design.selectedChassis == null || result.totalVolumeU > result.maxAllowedVolumeU)
-            {
-                result.volumeStatus = RYGStatus.Red;
-            }
-            else if (result.totalVolumeU > result.maxAllowedVolumeU * 0.90f)
-            {
-                result.volumeStatus = RYGStatus.Yellow;
-            }
-            else
-            {
-                result.volumeStatus = RYGStatus.Green;
+                result.MassMarginStatus = RYGStatus.Green;
             }
 
             // =========================================================================
@@ -111,670 +99,468 @@ namespace SpaceMissionGame.Core
 
             foreach (ComponentPart part in equippedParts)
             {
-                peakSolarW += part.powerGeneratedWatts;
-                powerConsumedW += part.powerConsumedWatts;
-                batteryWh += part.batteryCapacityWh;
+                peakSolarW += part.PowerGeneratedW;
+                powerConsumedW += part.PowerConsumedW;
+                batteryWh += part.BatteryCapacityWh;
             }
 
-            float sunlightFraction = design.selectedOrbit != null && design.selectedOrbit.sunlightFraction > 0f
-                ? design.selectedOrbit.sunlightFraction
-                : 0.60f;
-            float orbitPeriodMins = design.selectedOrbit != null && design.selectedOrbit.orbitalPeriodMinutes > 0f
-                ? design.selectedOrbit.orbitalPeriodMinutes
-                : 92.5f;
+            float sunlightFraction = GetOrbitSunlightFraction(design.SelectedOrbit);
+            float orbitPeriodMins = GetOrbitPeriodMinutes(design.SelectedOrbit);
 
-            result.peakSolarGeneratedWatts = peakSolarW;
-            result.orbitAverageGeneratedWatts = peakSolarW * sunlightFraction;
-            result.totalPowerConsumedWatts = powerConsumedW;
-            result.totalBatteryCapacityWh = batteryWh;
+            result.TotalPowerGeneratedW = peakSolarW * sunlightFraction;
+            result.TotalPowerConsumedW = powerConsumedW;
 
-            // Power Margin (%) = ((OrbitAvgGenerated - Consumed) / OrbitAvgGenerated) * 100
-            if (result.orbitAverageGeneratedWatts > 0f)
+            if (result.TotalPowerGeneratedW > 0f)
             {
-                result.powerMarginPercent = ((result.orbitAverageGeneratedWatts - result.totalPowerConsumedWatts) / result.orbitAverageGeneratedWatts) * 100f;
+                result.PowerMarginPercent = ((result.TotalPowerGeneratedW - result.TotalPowerConsumedW) / result.TotalPowerGeneratedW) * 100f;
             }
             else
             {
-                result.powerMarginPercent = -100f;
+                result.PowerMarginPercent = -100f;
             }
 
-            // Eclipse Energy Required (Wh) = Power Consumed (W) * Eclipse Hours
             float eclipseHours = (orbitPeriodMins * (1f - sunlightFraction)) / 60f;
-            result.eclipseEnergyRequiredWh = result.totalPowerConsumedWatts * eclipseHours;
+            float eclipseEnergyNeededWh = result.TotalPowerConsumedW * eclipseHours;
+            bool survivesEclipse = batteryWh > 0f && batteryWh >= eclipseEnergyNeededWh;
 
-            // Standard CubeSat Li-Ion safe depth of discharge check (batteryWh >= eclipseEnergyRequiredWh)
-            result.survivesEclipseOnBattery = result.totalBatteryCapacityWh > 0f
-                && result.totalBatteryCapacityWh >= result.eclipseEnergyRequiredWh;
+            float reqPowerMargin = mission.RequiredPowerMarginPct > 0f ? mission.RequiredPowerMarginPct : 15f;
 
-            if (result.orbitAverageGeneratedWatts <= 0f || result.powerMarginPercent < 0f || !result.survivesEclipseOnBattery)
+            if (result.TotalPowerGeneratedW <= 0f || result.PowerMarginPercent < 0f || !survivesEclipse)
             {
-                result.powerStatus = RYGStatus.Red;
+                result.PowerMarginStatus = RYGStatus.Red;
             }
-            else if (result.powerMarginPercent < mission.requiredPowerMarginPercent
-                     || result.totalBatteryCapacityWh < result.eclipseEnergyRequiredWh * 1.25f)
+            else if (result.PowerMarginPercent < reqPowerMargin)
             {
-                result.powerStatus = RYGStatus.Yellow;
+                result.PowerMarginStatus = RYGStatus.Yellow;
             }
             else
             {
-                result.powerStatus = RYGStatus.Green;
+                result.PowerMarginStatus = RYGStatus.Green;
             }
 
             // =========================================================================
             // 3. BUDGET & COST RESERVE CALCULATIONS
             // =========================================================================
-            float hardwareCost = 0f;
+            float totalCost = design.ExtraTestingCostThousands;
             foreach (ComponentPart part in equippedParts)
             {
-                hardwareCost += part.costThousands;
+                totalCost += part.CostThousands;
             }
 
-            result.hardwareCostThousands = hardwareCost;
-            result.testingCostThousands = design.additionalTestingCostThousands;
-            result.totalCostThousands = hardwareCost + design.additionalTestingCostThousands;
-            result.budgetCapThousands = mission.budgetCapThousands;
-
-            result.costReservePercent = mission.budgetCapThousands > 0f
-                ? ((mission.budgetCapThousands - result.totalCostThousands) / mission.budgetCapThousands) * 100f
+            result.TotalCostThousands = totalCost;
+            result.BudgetCapThousands = mission.BudgetCapThousands > 0f ? mission.BudgetCapThousands : 200f;
+            result.BudgetReservePercent = result.BudgetCapThousands > 0f
+                ? ((result.BudgetCapThousands - result.TotalCostThousands) / result.BudgetCapThousands) * 100f
                 : -100f;
 
-            if (result.totalCostThousands > mission.budgetCapThousands)
+            if (result.TotalCostThousands > result.BudgetCapThousands)
             {
-                result.budgetStatus = RYGStatus.Red;
+                result.CostStatus = RYGStatus.Red;
             }
-            else if (result.costReservePercent < mission.requiredCostReservePercent)
+            else if (result.BudgetReservePercent < 10f)
             {
-                result.budgetStatus = RYGStatus.Yellow;
+                result.CostStatus = RYGStatus.Yellow;
             }
             else
             {
-                result.budgetStatus = RYGStatus.Green;
+                result.CostStatus = RYGStatus.Green;
             }
 
             // =========================================================================
-            // 4. TELECOM DATA LINK, ADCS POINTING, SCIENCE & RELIABILITY
+            // 4. TELECOM DATA LINK, SCIENCE SCORE & RELIABILITY
             // =========================================================================
-            float dataGenMB = 0f;
-            int rawScienceScore = 0;
-            bool requiresNoaaLicense = false;
-            bool requiresFccLicense = false;
-            bool hasBurnWireParts = false;
-            bool hasOutgassingSensitiveOptics = false;
-            float strictestPayloadPointingReq = 0f;
+            float payloadDataRate = design.SelectedPayload != null ? design.SelectedPayload.DataRateMbps : 0f;
+            float commsRate = design.SelectedComms != null ? design.SelectedComms.DataRateMbps : 0f;
+            float groundRate = design.SelectedGroundStation != null ? design.SelectedGroundStation.DataRateMbps : 0f;
 
+            result.DataGeneratedPerOrbitMb = payloadDataRate;
+            result.DataDownlinkedPerOrbitMb = Mathf.Min(commsRate, groundRate);
+
+            bool isLunarMission = mission.Difficulty == MissionDifficulty.Hard_LunarPathfinder
+                || string.Equals(mission.RequiredOrbitId, "ORBIT_LUNAR", StringComparison.OrdinalIgnoreCase);
+
+            bool lunarCommsValid = true;
+            if (isLunarMission)
+            {
+                bool hasXBand = design.SelectedComms != null && design.SelectedComms.DataRateMbps >= 100f;
+                bool hasDsn = design.SelectedGroundStation != null && design.SelectedGroundStation.DataRateMbps >= 100f;
+                lunarCommsValid = hasXBand && hasDsn;
+            }
+
+            if (design.SelectedComms == null || design.SelectedGroundStation == null
+                || result.DataDownlinkedPerOrbitMb <= 0f
+                || (result.DataGeneratedPerOrbitMb > 0f && result.DataDownlinkedPerOrbitMb < result.DataGeneratedPerOrbitMb * 0.7f)
+                || !lunarCommsValid)
+            {
+                result.TelecomLinkStatus = RYGStatus.Red;
+            }
+            else if (result.DataDownlinkedPerOrbitMb < result.DataGeneratedPerOrbitMb)
+            {
+                result.TelecomLinkStatus = RYGStatus.Yellow;
+            }
+            else
+            {
+                result.TelecomLinkStatus = RYGStatus.Green;
+            }
+
+            // Science Score & Orbit Match
+            int rawScience = 0;
             foreach (ComponentPart part in equippedParts)
             {
-                dataGenMB += part.dataGeneratedMBPerDay;
-                rawScienceScore += part.scienceScoreBonus;
-
-                if (part.requiresNoaaCameraLicense) requiresNoaaLicense = true;
-                if (part.requiresFccRfLicense) requiresFccLicense = true;
-                if (part.usesDeployableBurnWire) hasBurnWireParts = true;
-                if (part.sensitiveToOutgassing) hasOutgassingSensitiveOptics = true;
-
-                if (part.category == PartCategory.Payload && part.pointingAccuracyDeg > 0f)
-                {
-                    if (strictestPayloadPointingReq <= 0f || part.pointingAccuracyDeg < strictestPayloadPointingReq)
-                    {
-                        strictestPayloadPointingReq = part.pointingAccuracyDeg;
-                    }
-                }
+                rawScience += part.SciencePoints;
             }
 
-            float requiredPointingDeg = mission.maxAllowedPointingErrorDeg > 0f
-                ? mission.maxAllowedPointingErrorDeg
-                : strictestPayloadPointingReq;
+            bool orbitMatchesMission = string.IsNullOrEmpty(mission.RequiredOrbitId)
+                || (design.SelectedOrbit != null && string.Equals(design.SelectedOrbit.Id, mission.RequiredOrbitId, StringComparison.OrdinalIgnoreCase));
 
-            float commsCap = design.selectedComms != null ? design.selectedComms.dataDownlinkMBPerDay : 0f;
-            float groundCap = design.selectedGroundStation != null ? design.selectedGroundStation.dataDownlinkMBPerDay : 0f;
+            result.TotalScienceScore = rawScience;
+            result.TargetScienceScore = mission.TargetScienceScore > 0 ? mission.TargetScienceScore : 70;
 
-            result.totalDataGeneratedMBPerDay = dataGenMB;
-            result.effectiveDataDownlinkMBPerDay = Mathf.Min(commsCap, groundCap);
-
-            if (result.totalDataGeneratedMBPerDay > 0f)
+            if (design.SelectedPayload == null || !orbitMatchesMission || result.TotalScienceScore < result.TargetScienceScore * 0.75f)
             {
-                result.dataDownlinkCoveragePercent = Mathf.Clamp(
-                    (result.effectiveDataDownlinkMBPerDay / result.totalDataGeneratedMBPerDay) * 100f,
-                    0f, 100f);
+                result.ScienceStatus = RYGStatus.Red;
+            }
+            else if (result.TotalScienceScore < result.TargetScienceScore)
+            {
+                result.ScienceStatus = RYGStatus.Yellow;
             }
             else
             {
-                result.dataDownlinkCoveragePercent = 0f;
+                result.ScienceStatus = RYGStatus.Green;
             }
 
-            // Deep Space / Lunar Comms Compatibility Check
-            bool deepSpaceCommsValid = true;
-            if (mission.requiresDeepSpaceCommsAndRadProtection || mission.requiredOrbit == OrbitType.Lunar_Orbit)
+            // =========================================================================
+            // 5. REGULATORY LICENSING & ENVIRONMENTAL TESTING (CubeSat 101)
+            // =========================================================================
+            bool requiresNoaa = design.SelectedPayload != null && design.SelectedPayload.RequiresNoaaCameraLicense;
+            bool requiresFcc = design.SelectedComms != null;
+
+            bool fccOk = !requiresFcc || design.HasFccIaruRfLicense;
+            bool noaaOk = !requiresNoaa || design.HasNoaaRemoteSensingLicense;
+
+            result.LicensingStatus = (fccOk && noaaOk) ? RYGStatus.Green : RYGStatus.Red;
+
+            bool hasBurnWireParts = false;
+            bool hasSafeBattery = design.SelectedBattery != null && design.SelectedBattery.IsULListedBattery;
+            foreach (ComponentPart part in equippedParts)
             {
-                bool hasXBand = design.selectedComms != null && design.selectedComms.partId == "comms_xband_iris";
-                bool hasDsn = design.selectedGroundStation != null && design.selectedGroundStation.partId == "ground_nasa_dsn";
-                deepSpaceCommsValid = hasXBand && hasDsn;
+                if (part.UsesDeployableBurnWire) hasBurnWireParts = true;
             }
 
-            if (design.selectedComms == null || design.selectedGroundStation == null
-                || result.dataDownlinkCoveragePercent < 70f || !deepSpaceCommsValid)
+            bool burnWireOk = !hasBurnWireParts || design.UsedDoubleBurnWire;
+            bool allCoreTestsDone = design.CompletedVibrationTest
+                && design.CompletedTvacBakeoutTest
+                && design.CompletedDitlSoftwareTest;
+
+            if (!hasSafeBattery || (!design.CompletedVibrationTest && !design.CompletedDitlSoftwareTest))
             {
-                result.dataStatus = RYGStatus.Red;
+                result.TestingAndVnvStatus = RYGStatus.Red;
             }
-            else if (result.dataDownlinkCoveragePercent < 100f)
+            else if (!allCoreTestsDone || !burnWireOk)
             {
-                result.dataStatus = RYGStatus.Yellow;
+                result.TestingAndVnvStatus = RYGStatus.Yellow;
             }
             else
             {
-                result.dataStatus = RYGStatus.Green;
+                result.TestingAndVnvStatus = RYGStatus.Green;
             }
 
-            // Check ADCS Pointing Accuracy & Lunar Magnetic Field limitation
-            bool adcsPointingValid = true;
-            bool magnetorquerInLunarOrbitError = false;
-            if (design.selectedAdcs == null)
-            {
-                adcsPointingValid = false;
-            }
-            else
-            {
-                if (requiredPointingDeg > 0f && design.selectedAdcs.pointingAccuracyDeg > requiredPointingDeg)
-                {
-                    adcsPointingValid = false;
-                }
-                if (mission.requiredOrbit == OrbitType.Lunar_Orbit && design.selectedAdcs.partId != "adcs_reaction_wheels")
-                {
-                    magnetorquerInLunarOrbitError = true;
-                    adcsPointingValid = false;
-                }
-            }
-
-            // Calculate Effective Science Score (penalized if data bottlenecked or pointing blurry)
-            float scienceMultiplier = 1.0f;
-            if (result.totalDataGeneratedMBPerDay > 0f && result.dataDownlinkCoveragePercent < 100f)
-            {
-                scienceMultiplier *= (result.dataDownlinkCoveragePercent / 100f);
-            }
-            if (!adcsPointingValid)
-            {
-                scienceMultiplier *= 0.65f; // Blurry images / off-target spectrometer reduces science return
-            }
-
-            result.totalScienceScore = Mathf.Max(0, Mathf.RoundToInt(rawScienceScore * scienceMultiplier) + design.dilemmaScienceModifier);
-            result.targetScienceScore = mission.targetScienceScore;
-
-            if (design.selectedPayloads.Count == 0 || result.totalScienceScore < mission.targetScienceScore * 0.75f)
-            {
-                result.scienceStatus = RYGStatus.Red;
-            }
-            else if (result.totalScienceScore < mission.targetScienceScore)
-            {
-                result.scienceStatus = RYGStatus.Yellow;
-            }
-            else
-            {
-                result.scienceStatus = RYGStatus.Green;
-            }
-
-            // Calculate Overall Reliability (%)
-            float sumReliability = 0f;
+            // Overall Reliability Calculation
+            float avgPartReliability = 0f;
             if (equippedParts.Count > 0)
             {
                 foreach (ComponentPart part in equippedParts)
                 {
-                    sumReliability += part.baseReliabilityPercent;
+                    avgPartReliability += part.ReliabilityScore;
                 }
-                sumReliability /= equippedParts.Count;
-            }
-            else
-            {
-                sumReliability = 0f;
+                avgPartReliability /= equippedParts.Count;
             }
 
-            // Phase 3 Testing & Redundancy Modifiers (CubeSat 101 rules)
-            float testBonus = 0f;
-            testBonus += design.completedVibrationTest ? 3.0f : -8.0f;
-            testBonus += design.completedDitlSoftwareTest ? 2.5f : -7.0f;
+            int testReliabilityMod = design.ExtraReliabilityModifier;
+            testReliabilityMod += design.CompletedVibrationTest ? 3 : -10;
+            testReliabilityMod += design.CompletedTvacBakeoutTest ? 3 : -8;
+            testReliabilityMod += design.CompletedDitlSoftwareTest ? 3 : -10;
+            if (hasBurnWireParts) testReliabilityMod += design.UsedDoubleBurnWire ? 3 : -6;
+            if (!hasSafeBattery) testReliabilityMod -= 20;
 
-            if (hasOutgassingSensitiveOptics)
-            {
-                testBonus += design.completedTvacBakeoutTest ? 3.0f : -10.0f;
-            }
-            else if (design.completedTvacBakeoutTest)
-            {
-                testBonus += 1.5f;
-            }
-
-            if (hasBurnWireParts)
-            {
-                testBonus += design.hasDoubleBurnWireRedundancy ? 3.0f : -6.0f;
-            }
-
-            if (!design.hasCertifiedBatteriesAndInhibits)
-            {
-                testBonus -= 15.0f;
-            }
-
-            result.overallReliabilityPercent = equippedParts.Count > 0
-                ? Mathf.Clamp(sumReliability + testBonus + design.dilemmaReliabilityModifier, 0f, 99.5f)
-                : 0f;
-
-            if (result.overallReliabilityPercent < mission.minReliabilityPercent - 10f)
-            {
-                result.reliabilityStatus = RYGStatus.Red;
-            }
-            else if (result.overallReliabilityPercent < mission.minReliabilityPercent)
-            {
-                result.reliabilityStatus = RYGStatus.Yellow;
-            }
-            else
-            {
-                result.reliabilityStatus = RYGStatus.Green;
-            }
+            result.FinalReliabilityPercent = equippedParts.Count > 0
+                ? Mathf.Clamp(Mathf.RoundToInt(avgPartReliability) + testReliabilityMod, 0, 99)
+                : 0;
 
             // =========================================================================
-            // 5. PHASE 3: JPL CML 4 RED / YELLOW / GREEN (RYG) CHECKLIST
+            // 6. JPL CML 4 GREEN CHECKLIST PERCENTAGE (7 Core RYG Pillars)
             // =========================================================================
-            BuildCml4Checklist(
+            RYGStatus[] statuses = new RYGStatus[]
+            {
+                result.ScienceStatus,
+                result.MassMarginStatus,
+                result.PowerMarginStatus,
+                result.TelecomLinkStatus,
+                result.LicensingStatus,
+                result.TestingAndVnvStatus,
+                result.CostStatus
+            };
+
+            int greenCount = 0;
+            int redCount = 0;
+            foreach (RYGStatus s in statuses)
+            {
+                if (s == RYGStatus.Green) greenCount++;
+                else if (s == RYGStatus.Red) redCount++;
+            }
+
+            result.CmlChecklistGreenPercentage = (greenCount / 7f) * 100f;
+
+            // =========================================================================
+            // 7. PHASE 4 & 5 FLIGHT SIMULATION LOGS & FINAL GRADE
+            // =========================================================================
+            PopulateFlightSimulationAndGrade(
                 mission,
                 design,
                 result,
-                chassisFitsDispenser,
-                adcsPointingValid,
-                magnetorquerInLunarOrbitError,
-                deepSpaceCommsValid,
-                requiresFccLicense,
-                requiresNoaaLicense,
+                fccOk,
+                noaaOk,
+                hasSafeBattery,
+                hasOdardebrisViolation,
+                orbitMatchesMission,
+                survivesEclipse,
                 hasBurnWireParts,
-                hasOutgassingSensitiveOptics,
-                requiredPointingDeg);
-
-            // =========================================================================
-            // 6. PHASE 4 & 5: FLIGHT SIMULATION SEQUENCE & FINAL NASA SCORECARD
-            // =========================================================================
-            SimulateFlightAndDebrief(
-                mission,
-                design,
-                result,
-                chassisFitsDispenser,
-                adcsPointingValid,
-                magnetorquerInLunarOrbitError,
-                deepSpaceCommsValid,
-                requiresFccLicense,
-                requiresNoaaLicense,
-                hasBurnWireParts,
-                hasOutgassingSensitiveOptics);
+                redCount);
 
             return result;
         }
 
-        private static void BuildCml4Checklist(
+        private static void PopulateFlightSimulationAndGrade(
             MissionProfile mission,
             SpacecraftDesign design,
-            SimulationResult result,
-            bool chassisFitsDispenser,
-            bool adcsPointingValid,
-            bool magnetorquerInLunarOrbitError,
-            bool deepSpaceCommsValid,
-            bool requiresFccLicense,
-            bool requiresNoaaLicense,
+            MissionEvaluationResult result,
+            bool fccOk,
+            bool noaaOk,
+            bool hasSafeBattery,
+            bool hasOdardebrisViolation,
+            bool orbitMatchesMission,
+            bool survivesEclipse,
             bool hasBurnWireParts,
-            bool hasOutgassingSensitiveOptics,
-            float requiredPointingDeg)
+            int redCount)
         {
-            result.cml4Checklist.Clear();
+            result.FlightSimulationLogs.Clear();
 
-            // 1. [Science] Science Traceability & Score
-            string sciDetail = $"Projected Science Return: {result.totalScienceScore} / {result.targetScienceScore} pts.";
-            if (design.selectedUserSegment == null)
-            {
-                sciDetail += " (Missing User Segment data plan!)";
-            }
-            result.cml4Checklist.Add(new ChecklistItem(
-                "Science",
-                "Science Traceability & Return",
-                 design.selectedUserSegment == null && result.scienceStatus == RYGStatus.Green ? RYGStatus.Yellow : result.scienceStatus,
-                sciDetail));
-
-            // 2. [Science] Orbit & Launch Trajectory Match
-            bool orbitMatches = design.selectedOrbit != null && design.selectedOrbit.orbitType == mission.requiredOrbit;
-            bool launcherMatchesOrbit = design.selectedLaunchVehicle != null
-                && design.selectedOrbit != null
-                && design.selectedLaunchVehicle.orbitType == design.selectedOrbit.orbitType;
-
-            RYGStatus orbitRyg = (orbitMatches && launcherMatchesOrbit) ? RYGStatus.Green : RYGStatus.Red;
-            string orbitDetail = (orbitMatches && launcherMatchesOrbit)
-                ? $"Matched target {mission.requiredOrbit} with compatible Launch Vehicle."
-                : "Mismatch between required Mission Orbit, selected GMAT Orbit, or Launch Vehicle trajectory!";
-
-            result.cml4Checklist.Add(new ChecklistItem("Science", "Orbit & Launch Trajectory Match", orbitRyg, orbitDetail));
-
-            // 3. [Technical] Mass, Volume & Dispenser Margin
-            RYGStatus massVolRyg = (result.massStatus == RYGStatus.Red || result.volumeStatus == RYGStatus.Red)
-                ? RYGStatus.Red
-                : (result.massStatus == RYGStatus.Yellow || result.volumeStatus == RYGStatus.Yellow ? RYGStatus.Yellow : RYGStatus.Green);
-
-            string massDetail = !chassisFitsDispenser
-                ? "Chassis form factor is too large for the selected Launch Dispenser!"
-                : $"Mass: {result.totalMassKg:F2}/{result.maxAllowedMassKg:F2} kg ({result.massMarginPercent:F1}% margin, req >= {mission.requiredMassMarginPercent:F0}%). Volume: {result.totalVolumeU:F1}/{result.maxAllowedVolumeU:F1}U.";
-
-            result.cml4Checklist.Add(new ChecklistItem("Technical", "Mass, Volume & Dispenser Margin", massVolRyg, massDetail));
-
-            // 4. [Technical] Orbital Power & Eclipse Battery Balance
-            string powerDetail = $"Orbit-Avg Power: {result.orbitAverageGeneratedWatts:F1}W vs {result.totalPowerConsumedWatts:F1}W draw ({result.powerMarginPercent:F1}% margin). "
-                               + $"Eclipse Battery: {result.totalBatteryCapacityWh:F1}Wh vs {result.eclipseEnergyRequiredWh:F1}Wh needed.";
-            result.cml4Checklist.Add(new ChecklistItem("Technical", "Orbital Power & Eclipse Balance", result.powerStatus, powerDetail));
-
-            // 5. [Technical] ADCS Pointing & Telecom Data Link
-            RYGStatus adcsCommsRyg = result.dataStatus;
-            string adcsCommsDetail = $"Downlink: {result.effectiveDataDownlinkMBPerDay:F0} MB/day vs {result.totalDataGeneratedMBPerDay:F0} MB/day generated ({result.dataDownlinkCoveragePercent:F0}%).";
-
-            if (!adcsPointingValid)
-            {
-                adcsCommsRyg = RYGStatus.Red;
-                adcsCommsDetail = magnetorquerInLunarOrbitError
-                    ? "Magnetorquers/Magnets cannot orient a spacecraft in Lunar Orbit (no strong magnetic field)! Use 3-Axis Reaction Wheels."
-                    : $"ADCS pointing ({design.selectedAdcs?.pointingAccuracyDeg ?? 99f:F1}°) fails mission/camera requirement (<= {requiredPointingDeg:F1}°)!";
-            }
-            else if (!deepSpaceCommsValid)
-            {
-                adcsCommsRyg = RYGStatus.Red;
-                adcsCommsDetail = "Lunar distance requires Iris X-Band Transponder paired with the NASA Deep Space Network (DSN)!";
-            }
-
-            result.cml4Checklist.Add(new ChecklistItem("Technical", "ADCS Pointing & Telecom Link", adcsCommsRyg, adcsCommsDetail));
-
-            // 6. [Management] Regulatory Licensing (FCC/IARU & NOAA)
-            bool fccOk = !requiresFccLicense || design.hasFccRfLicense;
-            bool noaaOk = !requiresNoaaLicense || design.hasNoaaCameraLicense;
-            RYGStatus licenseRyg = (fccOk && noaaOk) ? RYGStatus.Green : RYGStatus.Red;
-
-            string licenseDetail;
-            if (!fccOk && !noaaOk)
-                licenseDetail = "CRITICAL: Missing both FCC RF License and NOAA Remote Sensing Camera License! Spacecraft will be demanifested.";
-            else if (!fccOk)
-                licenseDetail = "CRITICAL: Missing FCC / IARU Radio Frequency License! Spacecraft cannot legally transmit.";
-            else if (!noaaOk)
-                licenseDetail = "CRITICAL: Earth-imaging camera requires a NOAA Remote Sensing License before launch!";
-            else
-                licenseDetail = "All required FCC RF and NOAA Remote Sensing licenses approved.";
-
-            result.cml4Checklist.Add(new ChecklistItem("Management", "Regulatory Licensing (FCC / NOAA)", licenseRyg, licenseDetail));
-
-            // 7. [Management] Environmental Verification & Hardware Safety (CubeSat 101)
-            bool vibeOk = design.completedVibrationTest;
-            bool ditlOk = design.completedDitlSoftwareTest;
-            bool tvacOk = !hasOutgassingSensitiveOptics || design.completedTvacBakeoutTest;
-            bool burnWireOk = !hasBurnWireParts || design.hasDoubleBurnWireRedundancy;
-
-            RYGStatus testRyg;
-            string testDetail;
-            if (vibeOk && ditlOk && tvacOk && burnWireOk && design.hasCertifiedBatteriesAndInhibits)
-            {
-                testRyg = RYGStatus.Green;
-                testDetail = "All CubeSat 101 verification tests (Vibration, TVAC, DITL) and burn-wire redundancies verified.";
-            }
-            else if (!vibeOk || !ditlOk || !design.hasCertifiedBatteriesAndInhibits)
-            {
-                testRyg = RYGStatus.Red;
-                testDetail = "Missing critical Vibration or Day-In-The-Life (DITL) software testing (high risk of launch/deployment failure)!";
-            }
-            else
-            {
-                testRyg = RYGStatus.Yellow;
-                testDetail = !tvacOk
-                    ? "Warning: Optical payload lacks TVAC Bakeout (outgassing will fog camera lens in vacuum!)."
-                    : "Warning: Deployable solar/antenna uses a single burn wire without redundancy.";
-            }
-
-            result.cml4Checklist.Add(new ChecklistItem("Management", "CubeSat 101 Verification & Testing", testRyg, testDetail));
-
-            // 8. [Cost] Budget Cap & JPL CML 4 Cost Reserve
-            string costDetail = $"Total Cost: ${result.totalCostThousands:F0}k / ${result.budgetCapThousands:F0}k Cap ({result.costReservePercent:F1}% reserve, req >= {mission.requiredCostReservePercent:F0}%).";
-            result.cml4Checklist.Add(new ChecklistItem("Cost", "Budget Cap & Cost Reserve Margin", result.budgetStatus, costDetail));
-
-            // Tally Green / Yellow / Red counts
-            int green = 0, yellow = 0, red = 0;
-            foreach (ChecklistItem item in result.cml4Checklist)
-            {
-                if (item.status == RYGStatus.Green) green++;
-                else if (item.status == RYGStatus.Yellow) yellow++;
-                else red++;
-            }
-
-            result.greenCount = green;
-            result.yellowCount = yellow;
-            result.redCount = red;
-            result.greenChecklistPercent = (green / (float)result.cml4Checklist.Count) * 100f;
-
-            // Pre-launch scrub check: missing licenses, overweight, over volume, wrong launcher/orbit, or over budget
-            result.isScrubbedBeforeLaunch = !design.IsCoreDesignComplete()
+            // Check Pre-Launch Scrub (Demanifested before liftoff)
+            bool scrubbed = !design.IsCoreDesignComplete()
                 || !fccOk
                 || !noaaOk
-                || result.totalMassKg > result.maxAllowedMassKg
-                || result.totalVolumeU > result.maxAllowedVolumeU
-                || !chassisFitsDispenser
-                || result.totalCostThousands > result.budgetCapThousands
-                || !orbitMatches
-                || !launcherMatchesOrbit;
+                || !hasSafeBattery
+                || hasOdardebrisViolation
+                || result.TotalMassKg > result.MaxAllowedMassKg
+                || result.TotalCostThousands > result.BudgetCapThousands;
 
-            result.passesCml4ReviewGate = !result.isScrubbedBeforeLaunch && result.redCount == 0;
+            if (scrubbed)
+            {
+                result.IsLaunchApproved = false;
+                result.IsMissionSuccess = false;
+                result.FinalGrade = "SCRUBBED";
+
+                result.FlightSimulationLogs.Add("[PRE-LAUNCH REVIEW] NASA Launch Integration Authority halted spacecraft manifesting.");
+
+                if (!fccOk)
+                    result.FlightSimulationLogs.Add("[SCRUBBED] Missing FCC/IARU Radio Frequency License. Unlicensed transmitters are prohibited from launch.");
+                if (!noaaOk)
+                    result.FlightSimulationLogs.Add("[SCRUBBED] Missing NOAA Remote Sensing License for Earth-imaging camera payload.");
+                if (!hasSafeBattery)
+                    result.FlightSimulationLogs.Add("[SCRUBBED] Range Safety Violation: Battery lacks UL 1642 certification and deployment inhibits.");
+                if (hasOdardebrisViolation)
+                    result.FlightSimulationLogs.Add("[SCRUBBED] ODAR Orbital Debris Violation: Titanium chassis will not burn up safely upon atmospheric re-entry.");
+                if (result.TotalMassKg > result.MaxAllowedMassKg)
+                    result.FlightSimulationLogs.Add($"[SCRUBBED] Spacecraft mass ({result.TotalMassKg:F2} kg) exceeds dispenser limit ({result.MaxAllowedMassKg:F2} kg).");
+                if (result.TotalCostThousands > result.BudgetCapThousands)
+                    result.FlightSimulationLogs.Add($"[SCRUBBED] Budget overrun: Spent ${result.TotalCostThousands:F0}k vs ${result.BudgetCapThousands:F0}k cap.");
+
+                return;
+            }
+
+            result.IsLaunchApproved = true;
+            result.FlightSimulationLogs.Add("[PHASE 4: LAUNCH] Pre-launch checks passed. Rocket liftoff nominal!");
+
+            // Stage 1: Vibration & Ascent
+            if (!design.CompletedVibrationTest)
+            {
+                result.IsMissionSuccess = false;
+                result.FinalGrade = "MISSION FAILED";
+                result.FlightSimulationLogs.Add("[STAGE 1: ASCENT FAILURE] Spacecraft suffered structural/solder failure during Max-Q vibration (Vibration Test was skipped!).");
+                return;
+            }
+            result.FlightSimulationLogs.Add("[STAGE 1: ASCENT] Survived rocket vibration loads and reached target altitude.");
+
+            // Stage 2: Dispenser Ejection & 45-min DITL Timer
+            if (!design.CompletedDitlSoftwareTest)
+            {
+                result.IsMissionSuccess = false;
+                result.FinalGrade = "MISSION FAILED";
+                result.FlightSimulationLogs.Add("[STAGE 2: EJECTION FAILURE] Flight software hung during the 45-minute post-deployment timer (DITL Test was skipped!).");
+                return;
+            }
+            result.FlightSimulationLogs.Add("[STAGE 2: DEPLOYMENT] Ejected from dispenser; 45-minute DITL inhibit timer completed.");
+
+            // Stage 3: Burn-Wire Deployment
+            if (hasBurnWireParts && !design.UsedDoubleBurnWire && result.MassMarginPercent < mission.RequiredMassMarginPct)
+            {
+                result.IsMissionSuccess = false;
+                result.FinalGrade = "MISSION FAILED";
+                result.FlightSimulationLogs.Add("[STAGE 3: MECHANISM JAM] Single non-redundant burn wire failed to release stowed solar/antenna mechanisms in cold vacuum!");
+                return;
+            }
+            result.FlightSimulationLogs.Add("[STAGE 3: BURN-WIRE] Solar panels and antennas deployed cleanly.");
+
+            // Stage 4: Orbit, Power/Eclipse & Telecom
+            if (!orbitMatchesMission)
+            {
+                result.IsMissionSuccess = false;
+                result.FinalGrade = "MISSION FAILED";
+                result.FlightSimulationLogs.Add($"[STAGE 4: ORBIT MISMATCH] Spacecraft inserted into wrong orbit ({design.SelectedOrbit?.Id}) instead of required {mission.RequiredOrbitId}!");
+                return;
+            }
+
+            if (result.PowerMarginStatus == RYGStatus.Red || !survivesEclipse)
+            {
+                result.IsMissionSuccess = false;
+                result.FinalGrade = "MISSION FAILED";
+                result.FlightSimulationLogs.Add($"[STAGE 4: ECLIPSE BROWN-OUT] Power deficit ({result.TotalPowerGeneratedW:F1}W orbit-avg vs {result.TotalPowerConsumedW:F1}W draw) drained battery in eclipse!");
+                return;
+            }
+
+            if (result.TelecomLinkStatus == RYGStatus.Red)
+            {
+                result.IsMissionSuccess = false;
+                result.FinalGrade = "MISSION FAILED";
+                result.FlightSimulationLogs.Add("[STAGE 4: TELECOM FAILURE] Radio/Ground station could not close the downlink budget for payload science data.");
+                return;
+            }
+
+            // Survived all stages! Check TVAC Outgassing & Final Grade
+            result.IsMissionSuccess = true;
+            if (!design.CompletedTvacBakeoutTest && design.SelectedPayload != null && design.SelectedPayload.RequiresNoaaCameraLicense)
+            {
+                result.TotalScienceScore = Mathf.RoundToInt(result.TotalScienceScore * 0.70f);
+                result.FlightSimulationLogs.Add("[WARNING: OUTGASSING] Skipping TVAC Bakeout caused adhesive outgassing to fog the camera lens in vacuum (-30% Science)!");
+            }
+
+            result.FlightSimulationLogs.Add($"[STAGE 4: OPERATIONS] Collecting science in sunlight, surviving eclipse on battery, and downlinking {result.DataDownlinkedPerOrbitMb:F0} Mbps to {design.SelectedGroundStation.Name}!");
+
+            if (result.CmlChecklistGreenPercentage >= 85f && redCount == 0 && result.TotalScienceScore >= result.TargetScienceScore)
+            {
+                result.FinalGrade = result.CmlChecklistGreenPercentage >= 99f ? "S" : "A";
+            }
+            else if (result.TotalScienceScore >= result.TargetScienceScore * 0.85f)
+            {
+                result.FinalGrade = "B";
+            }
+            else
+            {
+                result.FinalGrade = "C";
+            }
         }
 
-        private static void SimulateFlightAndDebrief(
-            MissionProfile mission,
-            SpacecraftDesign design,
-            SimulationResult result,
-            bool chassisFitsDispenser,
-            bool adcsPointingValid,
-            bool magnetorquerInLunarOrbitError,
-            bool deepSpaceCommsValid,
-            bool requiresFccLicense,
-            bool requiresNoaaLicense,
-            bool hasBurnWireParts,
-            bool hasOutgassingSensitiveOptics)
+        /// <summary>
+        /// Returns the GMAT sunlit fraction of an orbit (0.0 to 1.0).
+        /// </summary>
+        public static float GetOrbitSunlightFraction(ComponentPart orbitPart)
         {
-            result.flightLogTicker.Clear();
-            result.educationalDebriefNotes.Clear();
+            if (orbitPart == null || string.IsNullOrEmpty(orbitPart.Id)) return 0.60f;
 
-            // Check Pre-Launch Scrub (Demanifested at Launch Pad)
-            if (result.isScrubbedBeforeLaunch)
+            string id = orbitPart.Id.ToUpperInvariant();
+            if (id.Contains("LUNAR")) return 0.85f;
+            if (id.Contains("SSO") || id.Contains("SUNSYNC")) return 0.68f;
+            return 0.60f; // Default ISS 400km LEO (60% sun, 40% eclipse)
+        }
+
+        /// <summary>
+        /// Returns the GMAT orbital period in minutes.
+        /// </summary>
+        public static float GetOrbitPeriodMinutes(ComponentPart orbitPart)
+        {
+            if (orbitPart == null || string.IsNullOrEmpty(orbitPart.Id)) return 92.5f;
+
+            string id = orbitPart.Id.ToUpperInvariant();
+            if (id.Contains("LUNAR")) return 118.0f;
+            if (id.Contains("SSO") || id.Contains("SUNSYNC")) return 96.7f;
+            return 92.5f; // Default ISS 400km LEO
+        }
+
+        /// <summary>
+        /// Extension helper: Equips a ComponentPart into the matching slot on SpacecraftDesign.
+        /// </summary>
+        public static void EquipPart(this SpacecraftDesign design, ComponentPart part)
+        {
+            if (design == null || part == null) return;
+
+            switch (part.Category)
             {
-                result.stage1_SurvivedLaunchAscent = false;
-                result.stage2_SurvivedEjectionAndDitl = false;
-                result.stage3_SurvivedBurnWireDeployment = false;
-                result.stage4_SurvivedOrbitAndDownlink = false;
-
-                result.finalGrade = MissionGrade.MissionScrubbed;
-                result.headlineOutcome = "MISSION SCRUBBED — DEMANIFESTED AT PRE-LAUNCH REVIEW";
-                result.flightLogTicker.Add("[T-00:10:00] NASA Launch Integration Authority halted spacecraft integration.");
-
-                if (requiresFccLicense && !design.hasFccRfLicense)
-                {
-                    result.flightLogTicker.Add("[SCRUB] Missing FCC / IARU RF License. Unlicensed radio transmitters are barred from launch.");
-                    result.educationalDebriefNotes.Add("CubeSat 101 Rule: Every CubeSat with a radio transmitter must secure an FCC/IARU frequency allocation license before integration, or it will be demanifested.");
-                }
-                if (requiresNoaaLicense && !design.hasNoaaCameraLicense)
-                {
-                    result.flightLogTicker.Add("[SCRUB] Missing NOAA Remote Sensing License for Earth-imaging camera payload.");
-                    result.educationalDebriefNotes.Add("CubeSat 101 Rule: Any spacecraft carrying a camera capable of imaging Earth requires a NOAA license prior to launch.");
-                }
-                if (result.totalMassKg > result.maxAllowedMassKg || result.totalVolumeU > result.maxAllowedVolumeU || !chassisFitsDispenser)
-                {
-                    result.flightLogTicker.Add($"[SCRUB] Physical dispenser violation: {result.totalMassKg:F2}/{result.maxAllowedMassKg:F2} kg, {result.totalVolumeU:F1}/{result.maxAllowedVolumeU:F1}U.");
-                    result.educationalDebriefNotes.Add("CubeSat 101 Rule: CubeSats must strictly fit within P-POD / NanoRacks / 6U dispenser mass and volume limits to protect the primary rocket payload.");
-                }
-                if (result.totalCostThousands > result.budgetCapThousands)
-                {
-                    result.flightLogTicker.Add($"[SCRUB] Cost overrun: Spent ${result.totalCostThousands:F0}k against ${result.budgetCapThousands:F0}k grant cap.");
-                    result.educationalDebriefNotes.Add("JPL CML 4 Rule: Exceeding the NASA mission budget cap results in cancellation prior to Phase C/D.");
-                }
-                if (design.selectedOrbit == null || design.selectedOrbit.orbitType != mission.requiredOrbit
-                    || design.selectedLaunchVehicle == null || design.selectedLaunchVehicle.orbitType != design.selectedOrbit.orbitType)
-                {
-                    result.flightLogTicker.Add("[SCRUB] Selected Launch Vehicle or GMAT Orbit does not match the target science mission trajectory.");
-                    result.educationalDebriefNotes.Add("Systems Engineering Rule: Your Launch Segment and Orbit must deliver the Space Segment to the regime required by the science objectives.");
-                }
-
-                result.debriefSummary = "Your spacecraft was scrubbed before liftoff due to regulatory, budget, or physical integration violations.";
-                return;
+                case PartCategory.Chassis:
+                    design.SelectedChassis = part;
+                    break;
+                case PartCategory.LaunchVehicle:
+                    design.SelectedLaunchVehicle = part;
+                    break;
+                case PartCategory.Orbit:
+                    design.SelectedOrbit = part;
+                    break;
+                case PartCategory.Payload:
+                    design.SelectedPayload = part;
+                    break;
+                case PartCategory.SolarPanel:
+                    design.SelectedSolarPanel = part;
+                    break;
+                case PartCategory.Battery:
+                    design.SelectedBattery = part;
+                    break;
+                case PartCategory.ADCS:
+                    design.SelectedADCS = part;
+                    break;
+                case PartCategory.Communications:
+                    design.SelectedComms = part;
+                    break;
+                case PartCategory.GroundStation:
+                    design.SelectedGroundStation = part;
+                    break;
             }
+        }
 
-            // =========================================================================
-            // STAGE 1: Rocket Ascent & Vibration Survival
-            // =========================================================================
-            if (!design.completedVibrationTest || !design.hasCertifiedBatteriesAndInhibits)
-            {
-                result.stage1_SurvivedLaunchAscent = false;
-                result.stage2_SurvivedEjectionAndDitl = false;
-                result.stage3_SurvivedBurnWireDeployment = false;
-                result.stage4_SurvivedOrbitAndDownlink = false;
+        /// <summary>
+        /// Extension helper: Returns all non-null parts currently equipped in SpacecraftDesign.
+        /// </summary>
+        public static List<ComponentPart> GetAllSelectedParts(this SpacecraftDesign design)
+        {
+            List<ComponentPart> list = new List<ComponentPart>();
+            if (design == null) return list;
 
-                result.finalGrade = MissionGrade.LostInSpace;
-                result.headlineOutcome = "LOST IN SPACE — STRUCTURAL / ELECTRICAL FAILURE DURING LAUNCH";
-                result.flightLogTicker.Add("[T+00:02:15] Max-Q acoustic and vibration loads reached during rocket ascent.");
-                result.flightLogTicker.Add("[FAILURE] Unverified solder joints fractured under launch vibration (Vibration Test was skipped!).");
-                result.educationalDebriefNotes.Add("CubeSat 101 Rule: Environmental Vibration & Shock testing is essential before flight to ensure connectors and batteries survive rocket ascent loads.");
-                result.debriefSummary = "Your spacecraft launched, but suffered an internal electrical failure during rocket ascent because Vibration Testing was skipped.";
-                return;
-            }
+            if (design.SelectedChassis != null) list.Add(design.SelectedChassis);
+            if (design.SelectedLaunchVehicle != null) list.Add(design.SelectedLaunchVehicle);
+            if (design.SelectedOrbit != null) list.Add(design.SelectedOrbit);
+            if (design.SelectedPayload != null) list.Add(design.SelectedPayload);
+            if (design.SelectedSolarPanel != null) list.Add(design.SelectedSolarPanel);
+            if (design.SelectedBattery != null) list.Add(design.SelectedBattery);
+            if (design.SelectedADCS != null) list.Add(design.SelectedADCS);
+            if (design.SelectedComms != null) list.Add(design.SelectedComms);
+            if (design.SelectedGroundStation != null) list.Add(design.SelectedGroundStation);
 
-            result.stage1_SurvivedLaunchAscent = true;
-            result.flightLogTicker.Add("[T+00:08:30] Stage 1 Passed: Spacecraft survived rocket ascent vibration and reached target insertion altitude.");
+            return list;
+        }
 
-            // =========================================================================
-            // STAGE 2: Dispenser Ejection & 45-Minute DITL Timer
-            // =========================================================================
-            if (!design.completedDitlSoftwareTest)
-            {
-                result.stage2_SurvivedEjectionAndDitl = false;
-                result.stage3_SurvivedBurnWireDeployment = false;
-                result.stage4_SurvivedOrbitAndDownlink = false;
-
-                result.finalGrade = MissionGrade.LostInSpace;
-                result.headlineOutcome = "LOST IN SPACE — FLIGHT SOFTWARE & DEPLOYMENT TIMER BUG";
-                result.flightLogTicker.Add("[T+00:45:00] CubeSat ejected from dispenser. Separation switches released.");
-                result.flightLogTicker.Add("[FAILURE] Flight software entered an infinite boot-loop during the 45-minute post-ejection timer (DITL Test skipped!).");
-                result.educationalDebriefNotes.Add("CubeSat 101 Rule: A Day-In-The-Life (DITL) software test verifies that the 30-to-45-minute post-ejection wait timer and beacon sequence work autonomously.");
-                result.debriefSummary = "After ejection from the dispenser, an untested flight software timer bug prevented the spacecraft from waking up.";
-                return;
-            }
-
-            result.stage2_SurvivedEjectionAndDitl = true;
-            result.flightLogTicker.Add("[T+00:45:00] Stage 2 Passed: Ejected smoothly from dispenser; 45-minute DITL inhibit timer completed.");
-
-            // =========================================================================
-            // STAGE 3: Solar Panel & Antenna Burn-Wire Deployment
-            // =========================================================================
-            if (hasBurnWireParts && !design.hasDoubleBurnWireRedundancy && result.massMarginPercent < mission.requiredMassMarginPercent)
-            {
-                result.stage3_SurvivedBurnWireDeployment = false;
-                result.stage4_SurvivedOrbitAndDownlink = false;
-
-                result.finalGrade = MissionGrade.LostInSpace;
-                result.headlineOutcome = "LOST IN SPACE — BURN-WIRE DEPLOYMENT FAILURE";
-                result.flightLogTicker.Add("[T+00:46:00] Commanding Nichrome resistor burn wire to release stowed mechanisms...");
-                result.flightLogTicker.Add("[FAILURE] Single burn wire failed to sever the Vectran tie-down line in cold vacuum!");
-                result.educationalDebriefNotes.Add("CubeSat 101 Rule: Deployable solar panels and antennas held by fishing line should use a Double Burn Wire redundancy to prevent single-point deployment failures.");
-                result.debriefSummary = "Your deployable mechanism jammed in orbit because a single non-redundant burn wire failed to cut the tie-down cord.";
-                return;
-            }
-
-            result.stage3_SurvivedBurnWireDeployment = true;
-            result.flightLogTicker.Add("[T+00:47:00] Stage 3 Passed: Burn-wire release succeeded; solar arrays and antennas deployed.");
-
-            // =========================================================================
-            // STAGE 4: On-Orbit Science, Eclipse Survival & Ground Station Downlink
-            // =========================================================================
-            if (result.powerStatus == RYGStatus.Red)
-            {
-                result.stage4_SurvivedOrbitAndDownlink = false;
-                result.finalGrade = MissionGrade.LostInSpace;
-                result.headlineOutcome = "LOST IN SPACE — ORBITAL ECLIPSE BATTERY BROWN-OUT";
-                result.flightLogTicker.Add("[ORBIT 1 - ECLIPSE] Entering planetary shadow. Switching to Li-Ion battery bus...");
-                result.flightLogTicker.Add($"[FAILURE] Power deficit! Consuming {result.totalPowerConsumedWatts:F1}W with only {result.orbitAverageGeneratedWatts:F1}W orbit-avg generation and {result.totalBatteryCapacityWh:F1}Wh battery ({result.eclipseEnergyRequiredWh:F1}Wh needed for eclipse).");
-                result.educationalDebriefNotes.Add("GMAT & Power Rule: Solar panels only generate power during the sunlit fraction of the orbit. Your orbit-average solar generation and battery capacity (Wh) must cover continuous power draw through eclipse!");
-                result.debriefSummary = "Your spacecraft operated briefly in sunlight, but its batteries drained completely during the first orbital eclipse.";
-                return;
-            }
-
-            if (!deepSpaceCommsValid || result.effectiveDataDownlinkMBPerDay <= 0f)
-            {
-                result.stage4_SurvivedOrbitAndDownlink = false;
-                result.finalGrade = MissionGrade.LostInSpace;
-                result.headlineOutcome = "LOST IN SPACE — TELECOM LINK FAILURE (NO SIGNAL RECEIVED)";
-                result.flightLogTicker.Add("[ORBIT 2 - PASS] Attempting telemetry downlink to Ground Segment...");
-                result.flightLogTicker.Add("[FAILURE] Ground station could not close the RF link at orbital distance!");
-                result.educationalDebriefNotes.Add("NASA Telecom Rule: Deep-space Lunar missions require high-gain X-Band transponders paired with 34-meter NASA Deep Space Network dishes to close the link budget.");
-                result.debriefSummary = "Your spacecraft survived orbit insertion, but its radio signal was too weak to reach the selected Ground Station.";
-                return;
-            }
-
-            // Survived all 4 stages! Now evaluate science quality & engineering margins for S / A / B / C grade.
-            result.stage4_SurvivedOrbitAndDownlink = true;
-            result.flightLogTicker.Add($"[ORBIT 3 - SUNLIGHT] Collecting science payload data ({result.totalDataGeneratedMBPerDay:F0} MB/day) and charging batteries.");
-            result.flightLogTicker.Add($"[ORBIT 4 - ECLIPSE] Survived eclipse on battery ({result.eclipseEnergyRequiredWh:F1} / {result.totalBatteryCapacityWh:F1} Wh used).");
-            result.flightLogTicker.Add($"[ORBIT 5 - DOWNLINK] Beamed {result.effectiveDataDownlinkMBPerDay:F0} MB/day to {design.selectedGroundStation.partName}.");
-
-            bool outgassingPenalty = hasOutgassingSensitiveOptics && !design.completedTvacBakeoutTest;
-            if (outgassingPenalty)
-            {
-                result.flightLogTicker.Add("[WARNING] Camera lens fogged by adhesive outgassing in vacuum (TVAC Bakeout was skipped!). Science reduced by 30%.");
-                result.totalScienceScore = Mathf.RoundToInt(result.totalScienceScore * 0.70f);
-                result.educationalDebriefNotes.Add("CubeSat 101 Rule: Without a Thermal Vacuum (TVAC) bakeout test, volatile gases from plastics/epoxies condense onto cold camera lenses in space ('outgassing'), degrading optical science!");
-            }
-
-            if (!adcsPointingValid)
-            {
-                result.flightLogTicker.Add("[WARNING] ADCS pointing jitter caused blurry imagery / off-target spectroscopy. Science reduced.");
-                result.educationalDebriefNotes.Add(magnetorquerInLunarOrbitError
-                    ? "ADCS Rule: Magnetorquers rely on Earth's magnetosphere and cannot stabilize a spacecraft at the Moon! Use 3-Axis Reaction Wheels & Star Tracker."
-                    : "ADCS Rule: High-resolution cameras and spectrometers require active 3-axis attitude control (Magnetorquers or Reaction Wheels) to stay pointed at their target.");
-            }
-
-            if (result.dataDownlinkCoveragePercent < 100f)
-            {
-                result.flightLogTicker.Add($"[WARNING] Telecom bottleneck: Only {result.dataDownlinkCoveragePercent:F0}% of generated science data could be downlinked daily.");
-                result.educationalDebriefNotes.Add("Ground & Comms Segment Rule: Your onboard transceiver and ground station dish must match the daily data volume (MB/day) produced by your science payload.");
-            }
-
-            if (result.massStatus == RYGStatus.Green && result.powerStatus == RYGStatus.Green && result.budgetStatus == RYGStatus.Green)
-            {
-                result.educationalDebriefNotes.Add($"JPL CML 4 Excellence: Maintained healthy technical margins (+{result.massMarginPercent:F1}% Mass, +{result.powerMarginPercent:F1}% Power, +{result.costReservePercent:F1}% Cost Reserve).");
-            }
-            else
-            {
-                result.educationalDebriefNotes.Add($"JPL CML 4 Margin Note: Some technical margins were tighter than NASA's recommended thresholds (Mass: {result.massMarginPercent:F1}%, Power: {result.powerMarginPercent:F1}%, Cost Reserve: {result.costReservePercent:F1}%).");
-            }
-
-            // Assign Final Grade (S / A / B / C)
-            if (result.greenChecklistPercent >= 87.5f
-                && result.redCount == 0
-                && !outgassingPenalty
-                && adcsPointingValid
-                && result.totalScienceScore >= result.targetScienceScore)
-            {
-                if (result.greenChecklistPercent >= 99f && result.totalScienceScore >= result.targetScienceScore + 10)
-                {
-                    result.finalGrade = MissionGrade.S;
-                    result.headlineOutcome = "GRADE S — FLAWLESS NASA JPL CML 4 MISSION ARCHITECTURE!";
-                    result.debriefSummary = "Outstanding systems engineering! Your CubeSat met every NASA CML 4 margin, passed all environmental verification tests, and exceeded science goals.";
-                }
-                else
-                {
-                    result.finalGrade = MissionGrade.A;
-                    result.headlineOutcome = "GRADE A — FULL MISSION SUCCESS (CML 4 COMPLIANT)";
-                    result.debriefSummary = "Great job! Your mission achieved primary science objectives with compliant NASA technical margins and >= 80% Green CML 4 readiness.";
-                }
-            }
-            else if (result.totalScienceScore >= result.targetScienceScore * 0.80f && !outgassingPenalty && adcsPointingValid)
-            {
-                result.finalGrade = MissionGrade.B;
-                result.headlineOutcome = "GRADE B — PARTIAL MISSION SUCCESS (TIGHT MARGINS)";
-                result.debriefSummary = "Your spacecraft survived orbit and returned useful science data, though tight technical margins or downlink bottlenecks limited full potential.";
-            }
-            else
-            {
-                result.finalGrade = MissionGrade.C;
-                result.headlineOutcome = "GRADE C — DEGRADED SCIENCE RETURN (ENGINEERING DEFICIENCIES)";
-                result.debriefSummary = "Your spacecraft survived in orbit, but outgassing contamination, pointing errors, or telecom bottlenecks severely reduced science return.";
-            }
+        /// <summary>
+        /// Extension helper: Checks whether all 9 core slots in SpacecraftDesign are populated.
+        /// </summary>
+        public static bool IsCoreDesignComplete(this SpacecraftDesign design)
+        {
+            if (design == null) return false;
+            return design.SelectedChassis != null
+                && design.SelectedLaunchVehicle != null
+                && design.SelectedOrbit != null
+                && design.SelectedPayload != null
+                && design.SelectedSolarPanel != null
+                && design.SelectedBattery != null
+                && design.SelectedADCS != null
+                && design.SelectedComms != null
+                && design.SelectedGroundStation != null;
         }
     }
 }
