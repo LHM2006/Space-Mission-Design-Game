@@ -83,8 +83,8 @@ namespace SpaceMissionGame.UI
             if (cmlOutcomeBannerText != null)
             {
                 string outcomeTag = eval.IsMissionSuccess
-                    ? $"CML 4 Readiness: {eval.CmlChecklistGreenPercentage:F0}% GREEN • Flight Objectives Achieved"
-                    : $"CML 4 Readiness: {eval.CmlChecklistGreenPercentage:F0}% GREEN • Mission Terminated ({eval.FinalGrade})";
+                    ? $"CML 4 Readiness: {eval.CmlChecklistGreenPercentage:F0}% GREEN | Flight Objectives Achieved"
+                    : $"CML 4 Readiness: {eval.CmlChecklistGreenPercentage:F0}% GREEN | Mission Terminated ({eval.FinalGrade})";
                 cmlOutcomeBannerText.text = outcomeTag;
             }
 

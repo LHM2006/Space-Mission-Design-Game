@@ -29,8 +29,8 @@ namespace SpaceMissionGame.UI
         [SerializeField] private Image equippedBorderImage;
 
         [Header("Visual State Colors")]
-        [SerializeField] private Color normalCardColor = new Color(0.13f, 0.17f, 0.24f, 0.95f);
-        [SerializeField] private Color equippedCardColor = new Color(0.12f, 0.32f, 0.26f, 0.98f);
+        [SerializeField] private Color normalCardColor = new Color(0.13f, 0.17f, 0.24f, 0.98f);
+        [SerializeField] private Color equippedCardColor = new Color(0.11f, 0.34f, 0.25f, 0.99f);
         [SerializeField] private Color equippedBorderColor = new Color(0.18f, 0.80f, 0.44f, 1f);
 
         private ComponentPart _part;
@@ -56,7 +56,7 @@ namespace SpaceMissionGame.UI
 
             if (categoryBadgeText != null)
             {
-                categoryBadgeText.text = $"[{part.Segment.ToString().ToUpper()} • {part.Category}]";
+                categoryBadgeText.text = $"[{part.Segment.ToString().ToUpper()} - {part.Category}]";
             }
 
             if (statsSummaryText != null)
@@ -93,7 +93,14 @@ namespace SpaceMissionGame.UI
 
             if (selectButtonLabel != null)
             {
-                selectButtonLabel.text = isEquipped ? "EQUIPPED ✓" : "SELECT PART";
+                selectButtonLabel.text = isEquipped ? "[EQUIPPED]" : "EQUIP PART";
+            }
+
+            if (selectButton != null && selectButton.targetGraphic != null)
+            {
+                selectButton.targetGraphic.color = isEquipped
+                    ? new Color(0.18f, 0.72f, 0.40f, 1f)
+                    : new Color(0.20f, 0.48f, 0.78f, 1f);
             }
         }
 
@@ -110,7 +117,7 @@ namespace SpaceMissionGame.UI
             List<string> tags = new List<string>();
 
             if (p.MaxMassCapacityKg > 0f)
-                tags.Add($"Max Load: {p.MaxMassCapacityKg:F2} kg");
+                tags.Add($"Max: {p.MaxMassCapacityKg:F2} kg");
             if (p.MassKg > 0f)
                 tags.Add($"Mass: {p.MassKg:F2} kg");
             if (p.PowerGeneratedW > 0f)
@@ -118,14 +125,14 @@ namespace SpaceMissionGame.UI
             if (p.PowerConsumedW > 0f)
                 tags.Add($"Draw: -{p.PowerConsumedW:F1} W");
             if (p.BatteryCapacityWh > 0f)
-                tags.Add($"Battery: {p.BatteryCapacityWh:F0} Wh");
+                tags.Add($"Bat: {p.BatteryCapacityWh:F0} Wh");
             if (p.DataRateMbps > 0f)
             {
-                string dataLabel = p.Category == PartCategory.Payload ? "Data Gen" : "Downlink";
+                string dataLabel = p.Category == PartCategory.Payload ? "Data" : "Link";
                 tags.Add($"{dataLabel}: {p.DataRateMbps:F0} Mbps");
             }
             if (p.SciencePoints > 0)
-                tags.Add($"Science: +{p.SciencePoints}");
+                tags.Add($"Sci: +{p.SciencePoints}");
 
             tags.Add($"Cost: ${p.CostThousands:F0}k");
             tags.Add($"Rel: {p.ReliabilityScore}%");
@@ -147,7 +154,7 @@ namespace SpaceMissionGame.UI
                 warnings.Add("<color=#E84C3D>[ODAR Debris Risk: Titanium!]</color>");
 
             if (warnings.Count == 0) return p.Description;
-            return $"{p.Description}\n{string.Join(" ", warnings)}";
+            return $"{p.Description} {string.Join(" ", warnings)}";
         }
     }
 }

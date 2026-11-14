@@ -37,15 +37,34 @@ namespace SpaceMissionGame.UI
 
         private float _targetFillNormalized = 0f;
         private Color _targetColor;
+        private static Sprite _fallbackWhiteSprite;
 
         private void Awake()
         {
             _targetColor = greenColor;
-            if (fillBarImage != null)
+            EnsureFillBarSpriteAndMode();
+        }
+
+        private void EnsureFillBarSpriteAndMode()
+        {
+            if (fillBarImage == null) return;
+
+            // Unity UI Image.Type.Filled requires a non-null Sprite to respect fillAmount
+            if (fillBarImage.sprite == null)
             {
-                fillBarImage.fillAmount = 0f;
-                fillBarImage.color = greenColor;
+                if (_fallbackWhiteSprite == null)
+                {
+                    Texture2D tex = Texture2D.whiteTexture;
+                    _fallbackWhiteSprite = Sprite.Create(
+                        tex,
+                        new Rect(0f, 0f, tex.width, tex.height),
+                        new Vector2(0.5f, 0.5f));
+                }
+                fillBarImage.sprite = _fallbackWhiteSprite;
             }
+
+            fillBarImage.type = Image.Type.Filled;
+            fillBarImage.fillMethod = Image.FillMethod.Horizontal;
         }
 
         private void Update()
@@ -76,6 +95,8 @@ namespace SpaceMissionGame.UI
             RYGStatus status,
             string extraNote = "")
         {
+            EnsureFillBarSpriteAndMode();
+
             if (metricTitleText != null)
             {
                 metricTitleText.text = title;

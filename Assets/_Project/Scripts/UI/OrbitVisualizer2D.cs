@@ -13,15 +13,17 @@ namespace SpaceMissionGame.UI
     /// 
     /// Directly integrates with Member 1's `SpacecraftDesign`, `MissionEvaluationResult`,
     /// and `MissionCalculator`:
-    /// 1. 2D rotating Earth/Moon sprite and orbiting CubeSat sprite.
+    /// 1. Dynamically updates the 2D central planet (Earth LEO, Polar SSO, or Gray Moon) and CubeSat size (1U/3U/6U)
+    ///    to match the parts equipped in `BuilderUI`!
     /// 2. Visualizes Day/Night Eclipse Shadow Zone and Ground Station Signal Cone.
     /// 3. Streams Member 1's `FlightSimulationLogs` step-by-step into the Flight Log Ticker.
     /// </summary>
     public class OrbitVisualizer2D : MonoBehaviour
     {
-        [Header("1. 2D Visual Transforms (UI RectTransforms or 2D Sprites)")]
+        [Header("1. 2D Visual Transforms (UI RectTransforms)")]
         [Tooltip("The central rotating planet (Earth or Moon)")]
         [SerializeField] private RectTransform centralBodyTransform;
+        [SerializeField] private TMP_Text centralBodyLabel;
 
         [Tooltip("The orbiting CubeSat icon/sprite that revolves around the central body")]
         [SerializeField] private RectTransform cubeSatTransform;
@@ -33,9 +35,9 @@ namespace SpaceMissionGame.UI
         [SerializeField] private GameObject deployedSolarWingsVisual;
 
         [Header("2. 2D Orbit Geometry & Speeds")]
-        [SerializeField] private float orbitRadiusPixels = 190f;
-        [SerializeField] private float planetRotationSpeedDegPerSec = 12f;
-        [SerializeField] private float satelliteOrbitSpeedDegPerSec = 48f;
+        [SerializeField] private float orbitRadiusPixels = 148f;
+        [SerializeField] private float planetRotationSpeedDegPerSec = 14f;
+        [SerializeField] private float satelliteOrbitSpeedDegPerSec = 52f;
 
         [Header("3. GMAT Orbit Zone Angles (Degrees, 0 = Right, Counter-Clockwise)")]
         [SerializeField] private float eclipseStartAngleDeg = 135f;
@@ -49,6 +51,7 @@ namespace SpaceMissionGame.UI
         [SerializeField] private TMP_Text batteryChargeText;
         [SerializeField] private TMP_Text dataBufferAndDownlinkedText;
         [SerializeField] private TMP_Text flightLogTickerText;
+        [SerializeField] private Button backToBuilderButton;
         [SerializeField] private Button viewScorecardButton;
 
         private bool _isOrbitingActive = false;
@@ -67,15 +70,22 @@ namespace SpaceMissionGame.UI
         private const int MaxVisibleLogLines = 8;
         private Coroutine _sequenceCoroutine;
 
-        // Callback to notify Member 3's GameManager to switch to Phase 5 (PostMission_Scorecard)
+        public event Action OnBackToBuilderRequested;
         public event Action OnProceedToScorecardRequested;
 
         private void Awake()
         {
+            if (backToBuilderButton != null)
+            {
+                backToBuilderButton.onClick.RemoveAllListeners();
+                backToBuilderButton.onClick.AddListener(() => OnBackToBuilderRequested?.Invoke());
+            }
+
             if (viewScorecardButton != null)
             {
+                viewScorecardButton.onClick.RemoveAllListeners();
                 viewScorecardButton.onClick.AddListener(() => OnProceedToScorecardRequested?.Invoke());
-                viewScorecardButton.gameObject.SetActive(false);
+                viewScorecardButton.gameObject.SetActive(true);
             }
         }
 
@@ -102,7 +112,7 @@ namespace SpaceMissionGame.UI
             if (design == null) design = new SpacecraftDesign();
             if (eval == null) eval = MissionCalculator.EvaluateMission(design);
 
-            _isOrbitingActive = false;
+            _isOrbitingActive = eval.IsLaunchApproved;
             _currentOrbitAngleDeg = 0f;
             _batteryChargePct = 100f;
             _onboardDataBufferMB = 0f;
@@ -115,42 +125,77 @@ namespace SpaceMissionGame.UI
             _dataGeneratedMbps = eval.DataGeneratedPerOrbitMb;
             _downlinkCapacityMbps = eval.DataDownlinkedPerOrbitMb;
 
-            // Adjust eclipse angular width from Member 1's GMAT sunlight fraction
             float sunlightFraction = MissionCalculator.GetOrbitSunlightFraction(design.SelectedOrbit);
             float eclipseHalfSpanDeg = (1f - sunlightFraction) * 180f;
             eclipseStartAngleDeg = 180f - eclipseHalfSpanDeg;
             eclipseEndAngleDeg = 180f + eclipseHalfSpanDeg;
 
+            ApplyEquippedVisualsToOrbitArena(design);
+
             if (groundSignalLinkBeam != null) groundSignalLinkBeam.SetActive(false);
-            if (deployedSolarWingsVisual != null) deployedSolarWingsVisual.SetActive(false);
-            if (viewScorecardButton != null) viewScorecardButton.gameObject.SetActive(false);
+            if (deployedSolarWingsVisual != null) deployedSolarWingsVisual.SetActive(eval.IsLaunchApproved);
+            if (viewScorecardButton != null) viewScorecardButton.gameObject.SetActive(true);
 
             UpdateCubeSatPositionOnOrbit(0f);
-            UpdateLiveTelemetryReadouts("PRE-LAUNCH PAD CHECK");
+            UpdateLiveTelemetryReadouts("LAUNCH & ORBITAL INJECTION");
 
             if (_sequenceCoroutine != null) StopCoroutine(_sequenceCoroutine);
             _sequenceCoroutine = StartCoroutine(PlayMember1FlightSequence(design, eval));
         }
 
+        private void ApplyEquippedVisualsToOrbitArena(SpacecraftDesign design)
+        {
+            string orbitId = design.SelectedOrbit != null ? design.SelectedOrbit.Id.ToUpperInvariant() : "ORBIT_SSO";
+            string chassisId = design.SelectedChassis != null ? design.SelectedChassis.Id.ToUpperInvariant() : "CHASSIS_3U";
+
+            if (centralBodyTransform != null)
+            {
+                Image planetImg = centralBodyTransform.GetComponent<Image>();
+                if (planetImg != null)
+                {
+                    if (orbitId.Contains("LUNAR"))
+                        planetImg.color = new Color(0.62f, 0.65f, 0.70f, 1f); // Gray Moon
+                    else if (orbitId.Contains("SSO"))
+                        planetImg.color = new Color(0.14f, 0.58f, 0.78f, 1f); // Polar SSO Earth
+                    else
+                        planetImg.color = new Color(0.16f, 0.45f, 0.88f, 1f); // ISS LEO Earth
+                }
+
+                if (centralBodyLabel != null)
+                {
+                    centralBodyLabel.text = orbitId.Contains("LUNAR")
+                        ? "THE MOON\n(GMAT 2D)"
+                        : (orbitId.Contains("SSO") ? "EARTH SSO\n(POLAR 2D)" : "EARTH LEO\n(ISS 400km)");
+                }
+            }
+
+            if (cubeSatTransform != null)
+            {
+                if (chassisId.Contains("1U"))
+                    cubeSatTransform.sizeDelta = new Vector2(30f, 30f);
+                else if (chassisId.Contains("6U"))
+                    cubeSatTransform.sizeDelta = new Vector2(58f, 38f);
+                else
+                    cubeSatTransform.sizeDelta = new Vector2(46f, 28f);
+            }
+        }
+
         private IEnumerator PlayMember1FlightSequence(SpacecraftDesign design, MissionEvaluationResult eval)
         {
             string orbitTitle = design.SelectedOrbit != null ? design.SelectedOrbit.Name : "Low Earth Orbit";
-            SetStageHeader($"PHASE 4: LAUNCH & OPERATIONS — {orbitTitle}");
+            SetStageHeader($"PHASE 4: 2D ORBIT SIMULATION - {orbitTitle}");
 
-            // If scrubbed on launch pad, stream Member 1's scrub logs and stop before liftoff
             if (!eval.IsLaunchApproved)
             {
                 foreach (string log in eval.FlightSimulationLogs)
                 {
                     AppendFlightLog($"<color=#E84C3D>{log}</color>");
-                    yield return new WaitForSeconds(0.9f);
+                    yield return new WaitForSeconds(0.5f);
                 }
-                UpdateLiveTelemetryReadouts("SCRUBBED AT LAUNCH INTEGRATION");
-                EnableScorecardButton();
+                UpdateLiveTelemetryReadouts("SCRUBBED AT LAUNCH INTEGRATION (Click 'Back to Builder' or 'View Scorecard')");
                 yield break;
             }
 
-            // Stream Member 1's step-by-step FlightSimulationLogs and activate 2D visuals at each stage
             for (int i = 0; i < eval.FlightSimulationLogs.Count; i++)
             {
                 string log = eval.FlightSimulationLogs[i];
@@ -180,21 +225,18 @@ namespace SpaceMissionGame.UI
                 string coloredLog = FormatLogColor(log);
                 AppendFlightLog(coloredLog);
 
-                yield return new WaitForSeconds(1.25f);
+                yield return new WaitForSeconds(0.75f);
             }
 
             if (eval.IsMissionSuccess)
             {
-                yield return new WaitForSeconds(4.0f);
-                AppendFlightLog("<color=#2ECC71>[SIMULATION COMPLETE] Primary orbital passes finished. Click 'View Scorecard'.</color>");
+                AppendFlightLog("<color=#2ECC71>[SIMULATION READY] Live 2D orbit active! Click 'PROCEED TO NASA SCORECARD' whenever ready.</color>");
             }
             else
             {
                 _isOrbitingActive = false;
                 UpdateLiveTelemetryReadouts($"MISSION TERMINATED: {eval.FinalGrade}");
             }
-
-            EnableScorecardButton();
         }
 
         private string FormatLogColor(string rawLog)
@@ -237,7 +279,7 @@ namespace SpaceMissionGame.UI
 
             if (inEclipse && !_wasInEclipse)
             {
-                AppendFlightLog("ORBIT | Entered Earth Eclipse Shadow Zone. Running on Li-Ion battery...");
+                AppendFlightLog("ORBIT | Entered Eclipse Shadow Zone. Running on Li-Ion battery...");
             }
             else if (!inEclipse && _wasInEclipse)
             {
@@ -318,54 +360,6 @@ namespace SpaceMissionGame.UI
             {
                 flightLogTickerText.text = string.Join("\n", _flightLogLines);
             }
-        }
-
-        private void EnableScorecardButton()
-        {
-            if (viewScorecardButton != null)
-            {
-                viewScorecardButton.gameObject.SetActive(true);
-            }
-        }
-
-        // =====================================================================
-        // EDITOR TEST HELPERS (Uses Member 1's actual PartsDatabase & MissionCalculator!)
-        // =====================================================================
-
-        [ContextMenu("Test 1: Simulate Nominal BisonSat 3U SSO Mission")]
-        public void TestNominalBisonSatSimulation()
-        {
-            SpacecraftDesign design = new SpacecraftDesign
-            {
-                SelectedMission = new MissionProfile
-                {
-                    MissionId = "MISSION_2",
-                    Title = "BisonSat / Earth Forest Imager",
-                    Difficulty = MissionDifficulty.Medium_EarthObserver,
-                    BudgetCapThousands = 300f,
-                    TargetScienceScore = 85,
-                    RequiredOrbitId = "ORBIT_SSO",
-                    RequiredMassMarginPct = 20f,
-                    RequiredPowerMarginPct = 20f
-                },
-                SelectedChassis = PartsDatabase.GetPartById("CHASSIS_3U"),
-                SelectedLaunchVehicle = PartsDatabase.GetPartById("LAUNCH_RIDESHARE_LEO"),
-                SelectedOrbit = PartsDatabase.GetPartById("ORBIT_SSO"),
-                SelectedPayload = PartsDatabase.GetPartById("PAYLOAD_EARTH_CAMERA"),
-                SelectedSolarPanel = PartsDatabase.GetPartById("SOLAR_3U_DEPLOYABLE"),
-                SelectedBattery = PartsDatabase.GetPartById("BATTERY_UL_12WH"),
-                SelectedADCS = PartsDatabase.GetPartById("ADCS_MAGNETORQUERS"),
-                SelectedComms = PartsDatabase.GetPartById("COMMS_SBAND"),
-                SelectedGroundStation = PartsDatabase.GetPartById("GROUND_SBAND_DISH"),
-                HasFccIaruRfLicense = true,
-                HasNoaaRemoteSensingLicense = true,
-                CompletedVibrationTest = true,
-                CompletedTvacBakeoutTest = true,
-                CompletedDitlSoftwareTest = true,
-                UsedDoubleBurnWire = true
-            };
-
-            StartSimulation(design, MissionCalculator.EvaluateMission(design));
         }
     }
 }
