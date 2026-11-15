@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using SpaceMissionGame.Core;
 using SpaceMissionGame.Scenarios;
 using SpaceMissionGame.UI;
+using SpaceMissionGame.UI.Theme;
 
 namespace SpaceMissionGame.Managers
 {
@@ -37,6 +38,8 @@ namespace SpaceMissionGame.Managers
 
         private string _lastAppliedMissionId = string.Empty;
         private bool _isSyncingMissionProfile = false;
+        private bool _launchAnimationPending = false;
+        private bool _hasLaunchedCurrentMission = false;
 
         public GamePhase CurrentPhase => currentPhase;
         public ReviewEventManager ReviewManager => reviewEventManager;
@@ -48,10 +51,10 @@ namespace SpaceMissionGame.Managers
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void AutoBootstrapGameManager()
         {
-            if (FindFirstObjectByType<GameManager>() != null) return;
+            if (FindAnyObjectByType<GameManager>() != null) return;
 
-            CockpitUIAutoBuilder uiRoot = FindFirstObjectByType<CockpitUIAutoBuilder>();
-            if (uiRoot == null && FindFirstObjectByType<BuilderUI>() == null) return;
+            CockpitUIAutoBuilder uiRoot = FindAnyObjectByType<CockpitUIAutoBuilder>();
+            if (uiRoot == null && FindAnyObjectByType<BuilderUI>() == null) return;
 
             GameObject gmObj = new GameObject("NASA_GameManager_Member3");
             gmObj.AddComponent<ReviewEventManager>();
@@ -87,11 +90,11 @@ namespace SpaceMissionGame.Managers
         /// </summary>
         public void DiscoverAndWireSceneControllers()
         {
-            if (cockpitUI == null) cockpitUI = FindFirstObjectByType<CockpitUIAutoBuilder>();
-            if (builderUI == null) builderUI = cockpitUI != null ? cockpitUI.builderUI : FindFirstObjectByType<BuilderUI>();
-            if (resourceBarsUI == null) resourceBarsUI = cockpitUI != null ? cockpitUI.resourceBarsUI : FindFirstObjectByType<ResourceBarsUI>();
-            if (orbitVisualizer2D == null) orbitVisualizer2D = cockpitUI != null ? cockpitUI.orbitVisualizer2D : FindFirstObjectByType<OrbitVisualizer2D>();
-            if (scorecardUI == null) scorecardUI = cockpitUI != null ? cockpitUI.scorecardUI : FindFirstObjectByType<ScorecardUI>();
+            if (cockpitUI == null) cockpitUI = FindAnyObjectByType<CockpitUIAutoBuilder>();
+            if (builderUI == null) builderUI = cockpitUI != null ? cockpitUI.builderUI : FindAnyObjectByType<BuilderUI>();
+            if (resourceBarsUI == null) resourceBarsUI = cockpitUI != null ? cockpitUI.resourceBarsUI : FindAnyObjectByType<ResourceBarsUI>();
+            if (orbitVisualizer2D == null) orbitVisualizer2D = cockpitUI != null ? cockpitUI.orbitVisualizer2D : FindAnyObjectByType<OrbitVisualizer2D>();
+            if (scorecardUI == null) scorecardUI = cockpitUI != null ? cockpitUI.scorecardUI : FindAnyObjectByType<ScorecardUI>();
 
             if (builderUI != null)
             {
@@ -156,7 +159,11 @@ namespace SpaceMissionGame.Managers
             if (cockpitUI.screenSimulationButton != null)
             {
                 cockpitUI.screenSimulationButton.onClick.RemoveAllListeners();
-                cockpitUI.screenSimulationButton.onClick.AddListener(() => TransitionToPhase(GamePhase.PhaseCD_OrbitSimulation));
+                cockpitUI.screenSimulationButton.onClick.AddListener(() =>
+                {
+                    _launchAnimationPending = false;
+                    TransitionToPhase(GamePhase.PhaseCD_OrbitSimulation);
+                });
             }
 
             if (cockpitUI.screenScorecardButton != null)
@@ -185,6 +192,7 @@ namespace SpaceMissionGame.Managers
                 if (switchedMission && reviewEventManager != null)
                 {
                     reviewEventManager.ResetDilemmaState(design);
+                    _hasLaunchedCurrentMission = false;
                 }
 
                 _lastAppliedMissionId = design.SelectedMission.MissionId;
@@ -248,6 +256,8 @@ namespace SpaceMissionGame.Managers
                     }
 
                     // Advance to Phase 4: 2D Orbit & Launch Simulation!
+                    _launchAnimationPending = true;
+                    _hasLaunchedCurrentMission = true;
                     TransitionToPhase(GamePhase.PhaseCD_OrbitSimulation);
                 });
             }
@@ -275,6 +285,16 @@ namespace SpaceMissionGame.Managers
             {
                 case GamePhase.MainMenu:
                 case GamePhase.CML1_MissionSelect:
+                    if (HomeScreenOverlay.Instance != null)
+                    {
+                        HomeScreenOverlay.Instance.ShowHomeScreen();
+                    }
+                    else
+                    {
+                        cockpitUI.SwitchMainScreen("BUILDER");
+                    }
+                    break;
+
                 case GamePhase.CML2_3_SpacecraftBuilder:
                     cockpitUI.SwitchMainScreen("BUILDER");
                     break;
@@ -293,7 +313,43 @@ namespace SpaceMissionGame.Managers
                             reviewEventManager.EnrichEvaluationWithScenarioLogs(builderUI.CurrentDesign, builderUI.LastEvaluation);
                         }
                     }
-                    cockpitUI.SwitchMainScreen("SIMULATION");
+
+                    if (_launchAnimationPending || !_hasLaunchedCurrentMission)
+                    {
+                        cockpitUI.SwitchMainScreen("SIMULATION");
+                        if (_launchAnimationPending && orbitVisualizer2D != null)
+                        {
+                            var tracker = orbitVisualizer2D.GetComponent<OrbitMissionTimeTracker>();
+                            if (tracker != null) tracker.ResetTimer();
+                        }
+                    }
+                    else
+                    {
+                        // Returning to an already-launched orbit: show the panel without resetting logs/telemetry!
+                        cockpitUI.ShowPhasePanel("SIMULATION");
+                    }
+
+                    if (StarshipLaunchVisualizer2D.Instance != null && builderUI != null)
+                    {
+                        if (_launchAnimationPending)
+                        {
+                            _launchAnimationPending = false;
+                            StarshipLaunchVisualizer2D.Instance.PlayLaunchSequence(
+                                builderUI.CurrentDesign,
+                                builderUI.LastEvaluation,
+                                null
+                            );
+                        }
+                        else if (!_hasLaunchedCurrentMission)
+                        {
+                            StarshipLaunchVisualizer2D.Instance.ShowEmptyLaunchPad(() =>
+                                TransitionToPhase(GamePhase.CML2_3_SpacecraftBuilder));
+                        }
+                        else
+                        {
+                            StarshipLaunchVisualizer2D.Instance.SkipLaunch();
+                        }
+                    }
                     break;
 
                 case GamePhase.PostMission_Scorecard:
@@ -303,6 +359,13 @@ namespace SpaceMissionGame.Managers
                         if (reviewEventManager != null && builderUI.LastEvaluation != null)
                         {
                             reviewEventManager.EnrichEvaluationWithScenarioLogs(builderUI.CurrentDesign, builderUI.LastEvaluation);
+                        }
+                        if (SpaceMissionGame.Audio.SpaceSoundFX.Instance != null && builderUI.LastEvaluation != null)
+                        {
+                            if (builderUI.LastEvaluation.IsMissionSuccess)
+                                SpaceMissionGame.Audio.SpaceSoundFX.Instance.PlaySuccessChime();
+                            else
+                                SpaceMissionGame.Audio.SpaceSoundFX.Instance.PlayAlertBeep();
                         }
                     }
                     cockpitUI.SwitchMainScreen("SCORECARD");

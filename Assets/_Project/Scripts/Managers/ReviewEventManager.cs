@@ -250,7 +250,7 @@ namespace SpaceMissionGame.Managers
         {
             if (_dilemmaModalRoot != null) return;
 
-            Canvas targetCanvas = FindFirstObjectByType<Canvas>();
+            Canvas targetCanvas = FindAnyObjectByType<Canvas>();
             if (targetCanvas == null) return;
 
             // Full-screen semi-transparent backdrop
@@ -360,6 +360,9 @@ namespace SpaceMissionGame.Managers
             skipTxt.text = "Skip Remaining Cards -> Launch";
             skipTxt.fontSize = 14;
             _skipToLaunchButton.onClick.AddListener(FinishReviewSequence);
+
+            // Apply the same clean space theme (rounded card, pill buttons, font) to this popup
+            SpaceMissionGame.UI.Theme.SpaceUITheme.StyleHierarchy(_dilemmaModalRoot.transform, false);
         }
 
         private TMP_Text CreateModalText(
