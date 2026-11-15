@@ -6,10 +6,10 @@
 
 ## 🎮 For Judges & Players: How to Start & Play
 
-### Option A: Play in Browser (WebGL)
-- **Live Web App (GitHub Pages):** `https://lhm2006.github.io/Space-Mission-Design-Game/` *(served from the `gh-pages` branch)*
-- **Run WebGL Locally (`localhost`):** *(Do not open `index.html` directly via `file://`, as browsers block local WebGL `.unityweb` loading.)*
-  1. Export WebGL in Unity via **`Space Mission Build` → `2. Build WebGL (localhost & Web)`** (creates `Builds/WebGL`), or download the WebGL build archive.
+### Option A: Play Online in Browser (Recommended — No Install Needed)
+- **Live Web App (GitHub Pages):** **[https://lhm2006.github.io/Space-Mission-Design-Game/](https://lhm2006.github.io/Space-Mission-Design-Game/)** *(served live from the `gh-pages` branch — works directly in Chrome, Edge, or Firefox with no login required)*
+- **Or Run WebGL Locally (`localhost`):** *(Do not open `index.html` directly via `file://`, as browsers block local WebGL `.unityweb` loading.)*
+  1. Export WebGL in Unity via **`Space Mission Build` → `2. Build WebGL (localhost & Web)`** (creates `Builds/WebGL`).
   2. Start a local static server:
      ```bash
      python -m http.server 8080 --directory Builds/WebGL
@@ -17,9 +17,9 @@
      *(Or double-click `Builds/Play-Localhost.bat` if included in your local `Builds/` folder.)*
   3. Open **http://localhost:8080** in Chrome, Edge, or Firefox.
 
-### Option B: Run Offline on Windows (`.exe`)
-1. Download and extract `SpaceMissionDesignGame-Windows.zip` (or build locally via **`Space Mission Build` → `3. Build Windows (.exe)`**).
-2. Keep all extracted files together (`SpaceMissionDesignGame.exe`, `UnityPlayer.dll`, `SpaceMissionDesignGame_Data/`, etc.) and double-click **`SpaceMissionDesignGame.exe`**.
+### Option B: Download & Run Offline on Windows (`.exe`)
+1. Download **[`CubeSatArchitect-Windows.zip`](https://github.com/LHM2006/Space-Mission-Design-Game/releases/download/v1.0.0/CubeSatArchitect-Windows.zip)** (`37.9 MB`) from **[GitHub Release `v1.0.0` (`CubeSatArchitect Release 1.0.0`)](https://github.com/LHM2006/Space-Mission-Design-Game/releases/tag/v1.0.0)** *(or build locally via **`Space Mission Build` → `3. Build Windows (.exe)`**)*.
+2. Extract the full `.zip` archive into a folder, keep all extracted files/subfolders together (`UnityPlayer.dll`, `*_Data/`, etc.), and double-click the `.exe` application inside to play.
 
 ### Controls & Gameplay Flow (Mouse / Click Only)
 1. **Home Screen (`ORBITAL ARCHITECT`):** Pick a mission (**BioNutrients-2 ISS**, **BisonSat 3U SSO**, or **Artemis Lunar Ice Pathfinder**) and click **`SELECT & DESIGN >>`**, or click **`WATCH STARSHIP LAUNCH DEMO`**.
