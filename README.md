@@ -1,4 +1,47 @@
-# 🚀 NASA Space Apps Challenge 2026: Space Mission Design Game
+# 🚀 Orbital Architect — Space Mission Design Game (NASA Space Apps Challenge 2026)
+
+> **Built with Unity (`6000.6.9f1`, 2D URP, C#)** — Interactive spacecraft & mission systems engineering game modeling **NASA CML 1–4**, the **4 Mission Segments** (*Launch, Space, Ground, User*), real CubeSat constraints, Starship launch sequences, and 2D orbital simulation (`1x–128x` time warp).
+
+---
+
+## 🎮 For Judges & Players: How to Start & Play
+
+### Option A: Play in Browser (WebGL)
+- **Live Web App (GitHub Pages):** `https://lhm2006.github.io/Space-Mission-Design-Game/` *(served from the `gh-pages` branch)*
+- **Run WebGL Locally (`localhost`):** *(Do not open `index.html` directly via `file://`, as browsers block local WebGL `.unityweb` loading.)*
+  1. Export WebGL in Unity via **`Space Mission Build` → `2. Build WebGL (localhost & Web)`** (creates `Builds/WebGL`), or download the WebGL build archive.
+  2. Start a local static server:
+     ```bash
+     python -m http.server 8080 --directory Builds/WebGL
+     ```
+     *(Or double-click `Builds/Play-Localhost.bat` if included in your local `Builds/` folder.)*
+  3. Open **http://localhost:8080** in Chrome, Edge, or Firefox.
+
+### Option B: Run Offline on Windows (`.exe`)
+1. Download and extract `SpaceMissionDesignGame-Windows.zip` (or build locally via **`Space Mission Build` → `3. Build Windows (.exe)`**).
+2. Keep all extracted files together (`SpaceMissionDesignGame.exe`, `UnityPlayer.dll`, `SpaceMissionDesignGame_Data/`, etc.) and double-click **`SpaceMissionDesignGame.exe`**.
+
+### Controls & Gameplay Flow (Mouse / Click Only)
+1. **Home Screen (`ORBITAL ARCHITECT`):** Pick a mission (**BioNutrients-2 ISS**, **BisonSat 3U SSO**, or **Artemis Lunar Ice Pathfinder**) and click **`SELECT & DESIGN >>`**, or click **`WATCH STARSHIP LAUNCH DEMO`**.
+2. **Screen 1 — Spacecraft & Segment Builder (`CML 1–3`):** Switch across **1. Launch**, **2. Space**, **3. Ground**, and **4. User** segments to equip parts, toggle **Phase 3 Pre-Launch Licensing & Testing** (FCC/NOAA, Vibration, TVAC, DITL, Double Burn Wire), and balance the **6 Engineering Resource Margins** (**Mass, Power, Budget, Telecom Link, Science Return, Reliability**) until the **CML 4 RYG Checklist** is ready.
+3. **Screen 2 — 2D Orbit & Launch Visualizer (`CML 4`):** Click **`LAUNCH & SIMULATE 2D ORBIT (PHASE 4) >>`** to launch aboard Starship and simulate the orbit (`1x–128x` speed).
+4. **Screen 3 — NASA CML Scorecard (`Debrief`):** Review final engineering margins, pass/fail status, and mission results.
+
+---
+
+## 🛰️ NASA Data & Resources Used
+- **NASA JPL Concept Maturity Levels** (`13-3547_A1b.pdf`) — CML 1–4 progression & RYG technical margin checklist
+- **NASA SmallSat Institute: *Design & Develop Science Missions*** (`250323-design-and-develop-science-mission.pdf`) — 4 mission segments, 6-step lifecycle, BioNutrients-2 constraints
+- **NASA CubeSat Launch Initiative: *CubeSat 101*** (`nasa_csli_cubesat_101_508.pdf`) — 1U/3U/6U/P-POD standards and FCC/NOAA/TVAC/Vibration/DITL/Burn Wire mission-killers
+- **NASA GMAT R2026a** (`gmat-win-R2026a.zip`) — ISS, Sun-Synchronous Polar (SSO), and Lunar orbital presets
+
+## 🤖 Tech Stack & Use of Super Intelligence (SI / AI) Disclosure
+- **Tech Stack:** Unity `6000.6.9f1` (2D Universal Render Pipeline), C#, TextMeshPro, WebGL & Standalone Windows 64-bit targets, Git/GitHub.
+- **SI / AI Acknowledgment:** AI coding/engineering assistants were utilized to help accelerate C# boilerplate, UI wiring helpers, documentation, and Unity WebGL/Windows build automation. All challenge concepts, NASA systems-engineering design choices, and final verification were directed and reviewed by the team. No unauthorized NASA logos or branding were generated.
+
+---
+
+# 🛠️ Internal Architecture & Team Guide
 **Project Instruction & Master Architecture Guide (For All Team Members & Their Antigravity AI Assistants)**
 
 > **📌 INSTRUCTION FOR TEAMMATES' ANTIGRAVITY AI:**
